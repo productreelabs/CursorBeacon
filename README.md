@@ -6,6 +6,7 @@ Some VNC and screen-sharing setups don't show the Mac's cursor, so on a phone or
 
 - No permissions needed
 - Clicks pass straight through it
+- Changes shape with the real cursor: arrow, text beam, pointing hand, grab hands, crosshair, not-allowed, and resize arrows
 - Shows up only while someone is screen sharing, so you don't see two pointers at the Mac
 - Works across all Spaces, full-screen apps and multiple displays
 - No Dock icon, just a small menu bar item
@@ -47,6 +48,7 @@ CursorBeacon --color "#00E5FF" --show always
 | `--size`  | 40      | 12 to 200 points                                        |
 | `--color` | yellow  | yellow, red, green, blue, pink, orange, white, or hex   |
 | `--show`  | sharing | `sharing`, `always` or `off` (see below)                |
+| `--no-shapes` | off | Always draw the arrow instead of matching the cursor shape |
 | `--debug` | off     | Prints how many milliseconds each mouse move takes      |
 
 ## When the pointer shows
@@ -96,13 +98,13 @@ To stop it for good, run `launchctl unload` on the same file.
 
 ## How it works
 
-Each screen gets a transparent window that sits above everything and ignores mouse events. The arrow is drawn once, then moved inside that window on every mouse event, with a check on each display refresh to catch moves that don't send events. Since it's a normal window, it's part of the captured screen, unlike the real cursor, which some VNC setups leave out.
+Each screen gets a transparent window that sits above everything and ignores mouse events. Each shape is drawn once, then moved inside that window on every mouse event, with a check on each display refresh to catch moves that don't send events. A few times a second it compares the real cursor's silhouette with the standard macOS cursors to pick the matching shape. Since it's a normal window, it's part of the captured screen, unlike the real cursor, which some VNC setups leave out.
 
 ## Limitations
 
 - While someone is connected you'll see two pointers at the Mac itself.
 - CursorBeacon itself adds only a few milliseconds (check with `--debug`). Most visible lag on a phone comes from the VNC stream; lowering the viewer's picture quality helps.
-- The pointer is always an arrow; it doesn't change to a text beam or hand.
+- Custom cursors that apps draw themselves (for example a paint brush) show as the arrow. The shape can take up to a tenth of a second to switch.
 
 ## License
 

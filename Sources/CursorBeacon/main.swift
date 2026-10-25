@@ -26,6 +26,7 @@ struct Config {
     var stroke: NSColor = .black
     var strokeWidth: CGFloat = 2
     var showMode: ShowMode = .sharing
+    var matchShapes = true
     var debug = false
 
     static func parse(_ arguments: [String]) -> Config {
@@ -49,6 +50,8 @@ struct Config {
                 if let value = iterator.next(), let mode = ShowMode(rawValue: value.lowercased()) {
                     config.showMode = mode
                 }
+            case "--no-shapes":
+                config.matchShapes = false
             case "--debug":
                 config.debug = true
             case "-h", "--help":
@@ -89,23 +92,108 @@ extension NSColor {
     }
 }
 
+// MARK: - Pointer shapes
+
+/// Solid versions of the common macOS cursors, drawn in a unit square with y pointing down.
+enum PointerShape: CaseIterable {
+    case arrow, iBeam, pointingHand, openHand, closedHand, crosshair, notAllowed
+    case resizeHorizontal, resizeVertical, resizeDiagonalDown, resizeDiagonalUp
+
+    /// The point that sits on the mouse position, in the unit square.
+    var hotSpot: CGPoint {
+        switch self {
+        case .arrow: return CGPoint(x: 0, y: 0)
+        case .pointingHand: return CGPoint(x: 0.38, y: 0)
+        default: return CGPoint(x: 0.5, y: 0.5)
+        }
+    }
+
+    /// Filled parts of the shape. Parts may overlap; `evenOdd` parts get holes where their paths overlap.
+    var parts: [(path: CGPath, evenOdd: Bool)] {
+        switch self {
+        case .arrow:
+            return [(polygon([(0, 0), (0, 0.85), (0.22, 0.66), (0.36, 0.98), (0.50, 0.92), (0.36, 0.60), (0.62, 0.60)]), false)]
+        case .iBeam:
+            return [(polygon([
+                (0.30, 0), (0.70, 0), (0.70, 0.10), (0.56, 0.10), (0.56, 0.90), (0.70, 0.90),
+                (0.70, 1), (0.30, 1), (0.30, 0.90), (0.44, 0.90), (0.44, 0.10), (0.30, 0.10)
+            ]), false)]
+        case .pointingHand:
+            return [
+                rounded(0.30, 0.00, 0.16, 0.62), rounded(0.46, 0.30, 0.14, 0.36), rounded(0.60, 0.34, 0.13, 0.32),
+                rounded(0.73, 0.40, 0.12, 0.28), rounded(0.30, 0.50, 0.55, 0.48, radius: 0.14),
+                rounded(0.08, 0.56, 0.30, 0.14, angle: 40)
+            ].map { ($0, false) }
+        case .openHand:
+            return [
+                rounded(0.20, 0.12, 0.14, 0.50), rounded(0.35, 0.02, 0.14, 0.56), rounded(0.50, 0.04, 0.14, 0.54),
+                rounded(0.65, 0.14, 0.13, 0.46), rounded(0.20, 0.42, 0.58, 0.52, radius: 0.16),
+                rounded(0.00, 0.48, 0.32, 0.14, angle: 40)
+            ].map { ($0, false) }
+        case .closedHand:
+            return [
+                rounded(0.20, 0.26, 0.15, 0.20), rounded(0.35, 0.22, 0.15, 0.22), rounded(0.50, 0.22, 0.15, 0.22),
+                rounded(0.65, 0.26, 0.14, 0.20), rounded(0.20, 0.34, 0.59, 0.54, radius: 0.16),
+                rounded(0.06, 0.46, 0.28, 0.14, angle: 30)
+            ].map { ($0, false) }
+        case .crosshair:
+            return [
+                (CGPath(rect: CGRect(x: 0.44, y: 0, width: 0.12, height: 1), transform: nil), false),
+                (CGPath(rect: CGRect(x: 0, y: 0.44, width: 1, height: 0.12), transform: nil), false)
+            ]
+        case .notAllowed:
+            let ring = CGMutablePath()
+            ring.addEllipse(in: CGRect(x: 0.05, y: 0.05, width: 0.90, height: 0.90))
+            ring.addEllipse(in: CGRect(x: 0.18, y: 0.18, width: 0.64, height: 0.64))
+            return [(ring, true), (rotated(CGPath(rect: CGRect(x: 0.12, y: 0.435, width: 0.76, height: 0.13), transform: nil), by: 45), false)]
+        case .resizeHorizontal: return [(Self.doubleArrow, false)]
+        case .resizeVertical: return [(rotated(Self.doubleArrow, by: 90), false)]
+        case .resizeDiagonalDown: return [(rotated(Self.doubleArrow, by: 45), false)]
+        case .resizeDiagonalUp: return [(rotated(Self.doubleArrow, by: -45), false)]
+        }
+    }
+
+    private static let doubleArrow = polygon([
+        (0, 0.5), (0.25, 0.25), (0.25, 0.42), (0.75, 0.42), (0.75, 0.25),
+        (1, 0.5), (0.75, 0.75), (0.75, 0.58), (0.25, 0.58), (0.25, 0.75)
+    ])
+}
+
+private func polygon(_ points: [(CGFloat, CGFloat)]) -> CGPath {
+    let path = CGMutablePath()
+    path.addLines(between: points.map { CGPoint(x: $0.0, y: $0.1) })
+    path.closeSubpath()
+    return path
+}
+
+/// A pill or rounded rectangle, optionally turned around its own center (degrees, clockwise on screen).
+private func rounded(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat,
+                     radius: CGFloat? = nil, angle: CGFloat = 0) -> CGPath {
+    let rect = CGRect(x: x, y: y, width: width, height: height)
+    let r = radius ?? min(width, height) / 2
+    let path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+    return rotated(path, by: angle, around: CGPoint(x: rect.midX, y: rect.midY))
+}
+
+/// Turns a path by `degrees`, clockwise on screen, around a point (the middle of the unit square by default).
+private func rotated(_ path: CGPath, by degrees: CGFloat, around center: CGPoint = CGPoint(x: 0.5, y: 0.5)) -> CGPath {
+    var transform = CGAffineTransform(translationX: center.x, y: center.y)
+        .rotated(by: degrees * .pi / 180)
+        .translatedBy(x: -center.x, y: -center.y)
+    return path.copy(using: &transform) ?? path
+}
+
 // MARK: - Pointer image
 
-/// The arrow is drawn once into a bitmap per screen scale, then only moved around.
+/// Each shape is drawn once into a bitmap per screen scale, then only moved around.
 struct PointerImage {
     let image: CGImage
     let side: CGFloat
-    /// Arrow tip in unit coordinates of the image, bottom-left origin (Core Animation's anchor point).
-    let tip: CGPoint
+    /// Hot spot in unit coordinates of the image, bottom-left origin (Core Animation's anchor point).
+    let anchor: CGPoint
 
-    // Classic arrow shape in unit coordinates, tip at (0, 0), y pointing down.
-    private static let arrow: [(CGFloat, CGFloat)] = [
-        (0.00, 0.00), (0.00, 0.85), (0.22, 0.66), (0.36, 0.98),
-        (0.50, 0.92), (0.36, 0.60), (0.62, 0.60)
-    ]
-
-    init?(config: Config, scale: CGFloat) {
-        // Inset the shape so the stroke isn't clipped.
+    init?(shape: PointerShape, config: Config, scale: CGFloat) {
+        // Inset the shape so the outline isn't clipped.
         let inset = config.strokeWidth
         let side = config.size + inset * 2
         let pixels = Int((side * scale).rounded(.up))
@@ -122,24 +210,29 @@ struct PointerImage {
         context.translateBy(x: 0, y: side)
         context.scaleBy(x: 1, y: -1)
 
-        let path = CGMutablePath()
-        for (index, point) in Self.arrow.enumerated() {
-            let p = CGPoint(x: inset + point.0 * config.size, y: inset + point.1 * config.size)
-            index == 0 ? path.move(to: p) : path.addLine(to: p)
-        }
-        path.closeSubpath()
+        var toPoints = CGAffineTransform(translationX: inset, y: inset).scaledBy(x: config.size, y: config.size)
+        let parts = shape.parts.compactMap { part in part.path.copy(using: &toPoints).map { ($0, part.evenOdd) } }
 
-        context.addPath(path)
-        context.setFillColor(config.fill.cgColor)
+        // Outline every part with a double-width stroke, then fill on top: only the outer
+        // half of the stroke stays visible, so overlapping parts read as one outline.
         context.setStrokeColor(config.stroke.cgColor)
-        context.setLineWidth(config.strokeWidth)
+        context.setLineWidth(config.strokeWidth * 2)
         context.setLineJoin(.round)
-        context.drawPath(using: .fillStroke)
+        for (path, _) in parts {
+            context.addPath(path)
+            context.strokePath()
+        }
+        context.setFillColor(config.fill.cgColor)
+        for (path, evenOdd) in parts {
+            context.addPath(path)
+            context.fillPath(using: evenOdd ? .evenOdd : .winding)
+        }
 
         guard let image = context.makeImage() else { return nil }
         self.image = image
         self.side = side
-        self.tip = CGPoint(x: inset / side, y: 1 - inset / side)
+        let hotSpot = shape.hotSpot
+        self.anchor = CGPoint(x: (inset + hotSpot.x * config.size) / side, y: 1 - (inset + hotSpot.y * config.size) / side)
     }
 }
 
@@ -148,9 +241,15 @@ struct PointerImage {
 /// A transparent, click-through window covering one screen. Only the pointer layer inside it moves.
 final class OverlayWindow: NSPanel {
     private let pointer = CALayer()
+    private let images: [PointerShape: PointerImage]
 
     init?(screen: NSScreen, config: Config) {
-        guard let image = PointerImage(config: config, scale: screen.backingScaleFactor) else { return nil }
+        var images: [PointerShape: PointerImage] = [:]
+        for shape in PointerShape.allCases {
+            images[shape] = PointerImage(shape: shape, config: config, scale: screen.backingScaleFactor)
+        }
+        guard images[.arrow] != nil else { return nil }
+        self.images = images
 
         super.init(
             contentRect: screen.frame,
@@ -171,20 +270,25 @@ final class OverlayWindow: NSPanel {
         view.wantsLayer = true
         contentView = view
 
-        pointer.contents = image.image
         pointer.contentsScale = screen.backingScaleFactor
-        pointer.bounds = CGRect(x: 0, y: 0, width: image.side, height: image.side)
-        pointer.anchorPoint = image.tip    // So `position` is where the tip goes.
         pointer.isHidden = true
         // No implicit animations: the pointer should jump, not glide.
-        pointer.actions = ["position": NSNull(), "hidden": NSNull()]
+        pointer.actions = ["position": NSNull(), "hidden": NSNull(), "contents": NSNull(), "bounds": NSNull(), "anchorPoint": NSNull()]
         view.layer?.addSublayer(pointer)
+        setShape(.arrow)
     }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    /// Moves the arrow tip to a global screen location, or hides it if the location is on another screen.
+    func setShape(_ shape: PointerShape) {
+        guard let image = images[shape] ?? images[.arrow] else { return }
+        pointer.contents = image.image
+        pointer.bounds = CGRect(x: 0, y: 0, width: image.side, height: image.side)
+        pointer.anchorPoint = image.anchor  // So `position` is where the hot spot goes.
+    }
+
+    /// Moves the hot spot to a global screen location, or hides the pointer if the location is on another screen.
     func place(at location: NSPoint) {
         let onScreen = location.x >= frame.minX && location.x <= frame.maxX
             && location.y >= frame.minY && location.y <= frame.maxY
@@ -195,10 +299,78 @@ final class OverlayWindow: NSPanel {
     }
 }
 
+// MARK: - Cursor shape detection
+
+/// Works out which of our shapes matches the real cursor by comparing a small silhouette
+/// of the system cursor with the standard macOS cursors.
+final class CursorShapeDetector {
+    private static let gridSize = 16
+    /// Real matches come out at ~0; distinct standard cursors are at least ~0.08 apart.
+    private static let maxDistance: Float = 0.04
+    private var references: [(silhouette: [Float], shape: PointerShape)] = []
+
+    init() {
+        var cursors: [(NSCursor, PointerShape)] = [
+            (.arrow, .arrow), (.contextualMenu, .arrow), (.dragCopy, .arrow), (.dragLink, .arrow),
+            (.disappearingItem, .arrow), (.iBeam, .iBeam), (.iBeamCursorForVerticalLayout, .iBeam),
+            (.pointingHand, .pointingHand), (.openHand, .openHand), (.closedHand, .closedHand),
+            (.crosshair, .crosshair), (.operationNotAllowed, .notAllowed),
+            (.resizeLeftRight, .resizeHorizontal), (.resizeLeft, .resizeHorizontal), (.resizeRight, .resizeHorizontal),
+            (.resizeUpDown, .resizeVertical), (.resizeUp, .resizeVertical), (.resizeDown, .resizeVertical)
+        ]
+        if #available(macOS 15, *) {
+            // Window edge and corner cursors, new in macOS 15.
+            let positions: [(NSCursor.FrameResizePosition, PointerShape)] = [
+                (.left, .resizeHorizontal), (.right, .resizeHorizontal), (.top, .resizeVertical), (.bottom, .resizeVertical),
+                (.topLeft, .resizeDiagonalDown), (.bottomRight, .resizeDiagonalDown),
+                (.topRight, .resizeDiagonalUp), (.bottomLeft, .resizeDiagonalUp)
+            ]
+            for (position, shape) in positions {
+                for directions in [NSCursor.FrameResizeDirection.Set.all, [.inward], [.outward]] {
+                    cursors.append((.frameResize(position: position, directions: directions), shape))
+                }
+            }
+            cursors += [(.columnResize, .resizeHorizontal), (.rowResize, .resizeVertical)]
+        }
+        references = cursors.compactMap { cursor, shape in
+            Self.silhouette(of: cursor.image).map { ($0, shape) }
+        }
+    }
+
+    func currentShape() -> PointerShape {
+        guard let cursor = NSCursor.currentSystem, let silhouette = Self.silhouette(of: cursor.image) else { return .arrow }
+        var best: (distance: Float, shape: PointerShape) = (.infinity, .arrow)
+        for reference in references {
+            let distance = zip(silhouette, reference.silhouette).reduce(0) { $0 + abs($1.0 - $1.1) } / Float(silhouette.count)
+            if distance < best.distance { best = (distance, reference.shape) }
+        }
+        return best.distance <= Self.maxDistance ? best.shape : .arrow
+    }
+
+    /// The cursor image's opacity, squeezed into a small grid.
+    private static func silhouette(of image: NSImage) -> [Float]? {
+        let n = gridSize
+        var rect = CGRect(x: 0, y: 0, width: n, height: n)
+        guard image.size.width > 0,
+              let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil),
+              let context = CGContext(
+                data: nil, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n,
+                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue
+              )
+        else { return nil }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: n, height: n))
+        guard let data = context.data else { return nil }
+        let pixels = data.bindMemory(to: UInt8.self, capacity: n * n)
+        return (0..<n * n).map { Float(pixels[$0]) / 255 }
+    }
+}
+
 // MARK: - Cursor tracking
 
 /// Moves the pointer on every mouse event, with a display-synced check as a safety net
 /// for moves that don't produce events (for example, a VNC client warping the cursor).
+/// The shape follows the real cursor, checked a few times a second on a background queue:
+/// reading the system cursor can stall for over 100 ms, and the pointer must never wait on it.
 final class PointerTracker {
     private let config: Config
     private var windows: [OverlayWindow] = []
@@ -206,6 +378,13 @@ final class PointerTracker {
     private var displayLink: CVDisplayLink?
     private var lastLocation: NSPoint?
     private var isVisible = true
+    private let shapeQueue = DispatchQueue(label: "CursorBeacon.shape", qos: .userInitiated)
+    private var shapeDetector: CursorShapeDetector?   // Only used on `shapeQueue`.
+    private var shape: PointerShape = .arrow
+    private var shapeTimer: Timer?
+    private var shapeCheckRunning = false
+    private var movedSinceShapeCheck = true
+    private var lastShapeCheck: TimeInterval = 0
     private let latency = LatencyStats()
 
     init(config: Config) {
@@ -239,7 +418,42 @@ final class PointerTracker {
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.rebuildWindows() }
 
+        startShapeChecks()
         if config.debug { latency.start() }
+    }
+
+    /// Checks the cursor shape 10 times a second while the mouse moves, twice a second when it's still.
+    private func startShapeChecks() {
+        shapeTimer?.invalidate()
+        guard config.matchShapes else { return }
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            guard self.movedSinceShapeCheck || now - self.lastShapeCheck >= 0.5 else { return }
+            self.updateShape()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        shapeTimer = timer
+        updateShape()
+    }
+
+    private func updateShape() {
+        guard !shapeCheckRunning else { return }
+        shapeCheckRunning = true
+        movedSinceShapeCheck = false
+        lastShapeCheck = ProcessInfo.processInfo.systemUptime
+
+        shapeQueue.async { [weak self] in
+            guard let self else { return }
+            if self.shapeDetector == nil { self.shapeDetector = CursorShapeDetector() }
+            let current = self.shapeDetector?.currentShape() ?? .arrow
+            DispatchQueue.main.async {
+                self.shapeCheckRunning = false
+                guard current != self.shape else { return }
+                self.shape = current
+                self.windows.forEach { $0.setShape(current) }
+            }
+        }
     }
 
     /// Shows or hides the pointer. While hidden, the display-synced check is paused to save power.
@@ -249,11 +463,14 @@ final class PointerTracker {
         if visible {
             windows.forEach { $0.orderFrontRegardless() }
             if let displayLink { CVDisplayLinkStart(displayLink) }
+            startShapeChecks()
             lastLocation = nil
             update()
         } else {
             windows.forEach { $0.orderOut(nil) }
             if let displayLink { CVDisplayLinkStop(displayLink) }
+            shapeTimer?.invalidate()
+            shapeTimer = nil
         }
     }
 
@@ -261,6 +478,7 @@ final class PointerTracker {
     private func rebuildWindows() {
         windows.forEach { $0.close() }
         windows = NSScreen.screens.compactMap { OverlayWindow(screen: $0, config: config) }
+        windows.forEach { $0.setShape(shape) }
         if isVisible { windows.forEach { $0.orderFrontRegardless() } }
         lastLocation = nil
         update()
@@ -275,6 +493,7 @@ final class PointerTracker {
         let location = NSEvent.mouseLocation
         guard location != lastLocation else { return }
         lastLocation = location
+        movedSinceShapeCheck = true
         windows.forEach { $0.place(at: location) }
     }
 }
