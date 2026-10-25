@@ -29,6 +29,8 @@ struct Config {
     var strokeWidth: CGFloat = 2
     var showMode: ShowMode = .sharing
     var matchShapes = true
+    var showClicks = true
+    var hideWhenIdle = false
     var debug = false
 
     /// Command-line options apply on top of the saved settings, for this run only.
@@ -55,15 +57,22 @@ struct Config {
                 }
             case "--no-shapes":
                 config.matchShapes = false
+            case "--no-clicks":
+                config.showClicks = false
+            case "--hide-when-idle":
+                config.hideWhenIdle = true
             case "--debug":
                 config.debug = true
             case "-h", "--help":
                 print("""
-                Usage: CursorBeacon [--size 12-200] [--color name|#RRGGBB] [--show always|sharing|off] [--no-shapes] [--debug]
+                Usage: CursorBeacon [--size 12-200] [--color name|#RRGGBB] [--show always|sharing|off]
+                                    [--no-shapes] [--no-clicks] [--hide-when-idle] [--debug]
 
                 Colors: yellow, red, green, blue, pink, orange, white, or a hex value.
                 --show sharing (the default) draws the pointer only while someone is connected by VNC or Screen Sharing.
                 --no-shapes always draws the arrow instead of matching the cursor shape.
+                --no-clicks turns off the ring that shows each click.
+                --hide-when-idle fades the pointer out after 3 seconds without mouse activity.
                 --debug prints how many milliseconds CursorBeacon adds to each mouse move.
                 Control-Option-Command-B shows or hides the pointer at any time.
                 """)
@@ -79,7 +88,7 @@ struct Config {
 /// Settings chosen from the menu, remembered between launches.
 enum Settings {
     enum Key: String {
-        case size, color, showMode, matchShapes
+        case size, color, showMode, matchShapes, showClicks, hideWhenIdle
     }
 
     // A fixed name, so the same settings are used whether CursorBeacon runs as a plain binary or an app.
@@ -98,6 +107,12 @@ enum Settings {
         }
         if defaults.object(forKey: Key.matchShapes.rawValue) != nil {
             config.matchShapes = defaults.bool(forKey: Key.matchShapes.rawValue)
+        }
+        if defaults.object(forKey: Key.showClicks.rawValue) != nil {
+            config.showClicks = defaults.bool(forKey: Key.showClicks.rawValue)
+        }
+        if defaults.object(forKey: Key.hideWhenIdle.rawValue) != nil {
+            config.hideWhenIdle = defaults.bool(forKey: Key.hideWhenIdle.rawValue)
         }
         return config
     }
@@ -278,6 +293,8 @@ struct PointerImage {
 final class OverlayWindow: NSPanel {
     private let pointer = CALayer()
     private let images: [PointerShape: PointerImage]
+    private let rippleColor: CGColor
+    private let rippleRadius: CGFloat
 
     init?(screen: NSScreen, config: Config) {
         var images: [PointerShape: PointerImage] = [:]
@@ -286,6 +303,8 @@ final class OverlayWindow: NSPanel {
         }
         guard images[.arrow] != nil else { return nil }
         self.images = images
+        rippleColor = config.fill.cgColor
+        rippleRadius = max(config.size * 0.6, 18)
 
         super.init(
             contentRect: screen.frame,
@@ -324,14 +343,68 @@ final class OverlayWindow: NSPanel {
         pointer.anchorPoint = image.anchor  // So `position` is where the hot spot goes.
     }
 
+    private func contains(_ location: NSPoint) -> Bool {
+        location.x >= frame.minX && location.x <= frame.maxX && location.y >= frame.minY && location.y <= frame.maxY
+    }
+
     /// Moves the hot spot to a global screen location, or hides the pointer if the location is on another screen.
     func place(at location: NSPoint) {
-        let onScreen = location.x >= frame.minX && location.x <= frame.maxX
-            && location.y >= frame.minY && location.y <= frame.maxY
+        let onScreen = contains(location)
         pointer.isHidden = !onScreen
         if onScreen {
             pointer.position = CGPoint(x: location.x - frame.minX, y: location.y - frame.minY)
         }
+    }
+
+    /// Fades the pointer out slowly, or brings it back at once.
+    func setFaded(_ faded: Bool) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.5)
+        CATransaction.setDisableActions(!faded)
+        pointer.opacity = faded ? 0 : 1
+        CATransaction.commit()
+    }
+
+    /// A ring that grows from the click point and fades out. Right clicks get two rings.
+    func ripple(at location: NSPoint, double: Bool) {
+        guard contains(location), let root = contentView?.layer else { return }
+
+        let ripple = CALayer()
+        ripple.frame = CGRect(
+            x: location.x - frame.minX - rippleRadius, y: location.y - frame.minY - rippleRadius,
+            width: rippleRadius * 2, height: rippleRadius * 2
+        )
+        ripple.opacity = 0                 // Where it ends up once the animation finishes.
+        for scale: CGFloat in double ? [1, 0.6] : [1] {
+            let r = rippleRadius * scale
+            let circle = CGPath(ellipseIn: CGRect(x: rippleRadius - r, y: rippleRadius - r, width: r * 2, height: r * 2), transform: nil)
+            // A black ring under a colored one, so it shows on any background.
+            for (color, width) in [(NSColor.black.cgColor, CGFloat(6)), (rippleColor, CGFloat(3))] {
+                let ring = CAShapeLayer()
+                ring.path = circle
+                ring.fillColor = nil
+                ring.strokeColor = color
+                ring.lineWidth = width
+                ripple.addSublayer(ring)
+            }
+        }
+        root.insertSublayer(ripple, below: pointer)
+
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 0.2
+        grow.toValue = 1
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        let animation = CAAnimationGroup()
+        animation.animations = [grow, fade]
+        animation.duration = 0.35
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { ripple.removeFromSuperlayer() }
+        ripple.add(animation, forKey: "ripple")
+        CATransaction.commit()
     }
 }
 
@@ -423,6 +496,10 @@ final class PointerTracker {
     private var movedSinceShapeCheck = true
     private var lastShapeCheck: TimeInterval = 0
     private var lastMove: TimeInterval = 0
+    private static let idleDelay: TimeInterval = 3
+    private var idleTimer: Timer?
+    private var lastActivity: TimeInterval = 0
+    private var isFaded = false
     private let latency = LatencyStats()
 
     init(config: Config) {
@@ -442,6 +519,16 @@ final class PointerTracker {
             return event
         } as Any)
 
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        let clickHandler: (NSEvent) -> Void = { [weak self] event in self?.handleClick(event) }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: clickHandler) {
+            monitors.append(global)
+        }
+        monitors.append(NSEvent.addLocalMonitorForEvents(matching: clicks) { event in
+            clickHandler(event)
+            return event
+        } as Any)
+
         var link: CVDisplayLink?
         if CVDisplayLinkCreateWithActiveCGDisplays(&link) == kCVReturnSuccess, let link {
             CVDisplayLinkSetOutputHandler(link) { _, _, _, _, _ in
@@ -457,7 +544,40 @@ final class PointerTracker {
         ) { [weak self] _ in self?.rebuildWindows() }
 
         startShapeChecks()
+        startIdleChecks()
         if config.debug { latency.start() }
+    }
+
+    private func handleClick(_ event: NSEvent) {
+        guard isVisible else { return }
+        noteActivity()
+        guard config.showClicks else { return }
+        let location = NSEvent.mouseLocation
+        windows.forEach { $0.ripple(at: location, double: event.type == .rightMouseDown) }
+    }
+
+    /// Brings a faded pointer back and restarts the idle countdown.
+    private func noteActivity() {
+        lastActivity = ProcessInfo.processInfo.systemUptime
+        guard isFaded else { return }
+        isFaded = false
+        windows.forEach { $0.setFaded(false) }
+    }
+
+    /// Fades the pointer out after a few seconds without mouse activity, when that setting is on.
+    private func startIdleChecks() {
+        idleTimer?.invalidate()
+        idleTimer = nil
+        noteActivity()
+        guard config.hideWhenIdle else { return }
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self, !self.isFaded,
+                  ProcessInfo.processInfo.systemUptime - self.lastActivity >= Self.idleDelay else { return }
+            self.isFaded = true
+            self.windows.forEach { $0.setFaded(true) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        idleTimer = timer
     }
 
     /// Checks the cursor shape once the mouse has paused for 60 ms, then twice a second while it stays still.
@@ -500,7 +620,11 @@ final class PointerTracker {
         config = newConfig
         if !config.matchShapes { shape = .arrow }
         rebuildWindows()
-        if isVisible { startShapeChecks() }    // Starts or stops them to match the setting.
+        if isVisible {
+            // Start or stop these to match the settings.
+            startShapeChecks()
+            startIdleChecks()
+        }
     }
 
     /// Shows or hides the pointer. While hidden, the display-synced check is paused to save power.
@@ -511,6 +635,7 @@ final class PointerTracker {
             windows.forEach { $0.orderFrontRegardless() }
             if let displayLink { CVDisplayLinkStart(displayLink) }
             startShapeChecks()
+            startIdleChecks()
             lastLocation = nil
             update()
         } else {
@@ -518,6 +643,8 @@ final class PointerTracker {
             if let displayLink { CVDisplayLinkStop(displayLink) }
             shapeTimer?.invalidate()
             shapeTimer = nil
+            idleTimer?.invalidate()
+            idleTimer = nil
         }
     }
 
@@ -526,6 +653,7 @@ final class PointerTracker {
         windows.forEach { $0.close() }
         windows = NSScreen.screens.compactMap { OverlayWindow(screen: $0, config: config) }
         windows.forEach { $0.setShape(shape) }
+        isFaded = false
         if isVisible { windows.forEach { $0.orderFrontRegardless() } }
         lastLocation = nil
         update()
@@ -542,6 +670,7 @@ final class PointerTracker {
         lastLocation = location
         movedSinceShapeCheck = true
         lastMove = ProcessInfo.processInfo.systemUptime
+        noteActivity()
         windows.forEach { $0.place(at: location) }
     }
 }
@@ -706,6 +835,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let toggleItem = NSMenuItem(title: "", action: #selector(toggleNow), keyEquivalent: "b")
     private let shapesItem = NSMenuItem(title: "Match Cursor Shape", action: #selector(toggleShapes), keyEquivalent: "")
+    private let clicksItem = NSMenuItem(title: "Show Clicks", action: #selector(toggleClicks), keyEquivalent: "")
+    private let idleItem = NSMenuItem(title: "Hide When Idle", action: #selector(toggleIdle), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
     private var modeItems: [ShowMode: NSMenuItem] = [:]
     private var sizeItems: [CGFloat: NSMenuItem] = [:]
@@ -755,6 +886,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (size, item) in sizeItems { item.state = size == config.size ? .on : .off }
         for (color, item) in colorItems { item.state = color == config.color ? .on : .off }
         shapesItem.state = config.matchShapes ? .on : .off
+        clicksItem.state = config.showClicks ? .on : .off
+        idleItem.state = config.hideWhenIdle ? .on : .off
         loginItem.state = LoginItem.isEnabled ? .on : .off
     }
 
@@ -792,6 +925,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleShapes() {
         config.matchShapes.toggle()
         Settings.save(config.matchShapes, for: .matchShapes)
+        tracker?.apply(config)
+        refresh()
+    }
+
+    @objc private func toggleClicks() {
+        config.showClicks.toggle()
+        Settings.save(config.showClicks, for: .showClicks)
+        tracker?.apply(config)
+        refresh()
+    }
+
+    @objc private func toggleIdle() {
+        config.hideWhenIdle.toggle()
+        Settings.save(config.hideWhenIdle, for: .hideWhenIdle)
         tracker?.apply(config)
         refresh()
     }
@@ -844,6 +991,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         shapesItem.target = self
         menu.addItem(shapesItem)
+        clicksItem.target = self
+        menu.addItem(clicksItem)
+        idleItem.target = self
+        menu.addItem(idleItem)
         loginItem.target = self
         menu.addItem(loginItem)
         menu.addItem(.separator())

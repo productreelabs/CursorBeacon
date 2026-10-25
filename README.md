@@ -7,6 +7,7 @@ Some VNC and screen-sharing setups don't show the Mac's cursor, so on a phone or
 - No permissions needed
 - Clicks pass straight through it
 - Changes shape with the real cursor: arrow, text beam, pointing hand, grab hands, crosshair, not-allowed, and resize arrows
+- Flashes a ring on every click (two rings for a right click), so viewers see where you clicked
 - Shows up only while someone is screen sharing, so you don't see two pointers at the Mac
 - Works across all Spaces, full-screen apps and multiple displays
 - No Dock icon, just a menu bar item for size, color, when to show, and launch at login
@@ -44,6 +45,8 @@ Click the pointer icon in the menu bar to change:
 - **Size**: Small, Medium, Large or Huge
 - **Color**
 - **Match Cursor Shape**: turn off to always draw the arrow
+- **Show Clicks**: the ring on each click (on by default)
+- **Hide When Idle**: fade the pointer out after 3 seconds without mouse activity; it comes back as soon as you move or click (off by default)
 - **Launch at Login**
 
 Your choices are remembered between launches.
@@ -63,6 +66,8 @@ CursorBeacon --color "#00E5FF" --show always
 | `--color` | yellow  | yellow, red, green, blue, pink, orange, white, or hex   |
 | `--show`  | sharing | `sharing`, `always` or `off` (see below)                |
 | `--no-shapes` | off | Always draw the arrow instead of matching the cursor shape |
+| `--no-clicks` | off | Don't show a ring on clicks |
+| `--hide-when-idle` | off | Fade the pointer out after 3 seconds without mouse activity |
 | `--debug` | off     | Prints how many milliseconds each mouse move takes      |
 
 ## When the pointer shows
