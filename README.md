@@ -13,19 +13,41 @@ Some VNC and screen-sharing setups don't show the Mac's cursor, so on a phone or
 - No Dock icon, just a menu bar item for size, color, when to show, and launch at login
 - One Swift file, no dependencies
 
-## Requirements
+## Install
 
-macOS 12 or later and the Xcode command line tools:
+1. Download `CursorBeacon-x.y.z.zip` from the [latest release](https://github.com/logicberry/CursorBeacon/releases/latest) and unzip it.
+2. Drag **CursorBeacon.app** into **Applications** and open it. A pointer icon appears in the menu bar.
+
+Runs on macOS 12 or later, on both Apple Silicon and Intel Macs.
+
+**First launch:** the app isn't notarized by Apple, so macOS says it can't verify it. To allow it once:
+
+- **macOS 15 and later:** try to open the app, click **Done**, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**.
+- **macOS 12 to 14:** right-click the app, choose **Open**, then click **Open** again.
+
+Or remove the download flag in Terminal:
 
 ```sh
-xcode-select --install
+xattr -dr com.apple.quarantine /Applications/CursorBeacon.app
 ```
 
-## Build and run
+## Build from source
+
+You need macOS 12 or later and the Xcode command line tools (`xcode-select --install`).
+
+To build the app the same way as the release (universal, with icon, zipped):
 
 ```sh
 git clone https://github.com/logicberry/CursorBeacon.git
 cd CursorBeacon
+./build-app.sh
+```
+
+This creates `dist/CursorBeacon.app` and `dist/CursorBeacon-x.y.z.zip`.
+
+To just build and run the command-line version:
+
+```sh
 swift build -c release
 .build/release/CursorBeacon
 ```
@@ -60,15 +82,18 @@ CursorBeacon --size 56 --color red
 CursorBeacon --color "#00E5FF" --show always
 ```
 
-| Option    | Default | Notes                                                   |
-|-----------|---------|---------------------------------------------------------|
-| `--size`  | 40      | 12 to 200 points                                        |
-| `--color` | yellow  | yellow, red, green, blue, pink, orange, white, or hex   |
-| `--show`  | sharing | `sharing`, `always` or `off` (see below)                |
-| `--no-shapes` | off | Always draw the arrow instead of matching the cursor shape |
-| `--no-clicks` | off | Don't show a ring on clicks |
-| `--hide-when-idle` | off | Fade the pointer out after 3 seconds without mouse activity |
-| `--debug` | off     | Prints how many milliseconds each mouse move takes      |
+| Option             | Default | Notes                                                       |
+|--------------------|---------|-------------------------------------------------------------|
+| `--size`           | 40      | 12 to 200 points                                            |
+| `--color`          | yellow  | yellow, red, green, blue, pink, orange, white, or hex       |
+| `--show`           | sharing | `sharing`, `always` or `off` (see below)                    |
+| `--no-shapes`      | off     | Always draw the arrow instead of matching the cursor shape  |
+| `--no-clicks`      | off     | Don't show a ring on clicks                                 |
+| `--hide-when-idle` | off     | Fade the pointer out after 3 seconds without mouse activity |
+| `--debug`          | off     | Print how fast CursorBeacon reacts to mouse moves, in ms    |
+| `--version`        |         | Print the version                                           |
+
+Inside the app, the command-line version is at `/Applications/CursorBeacon.app/Contents/MacOS/CursorBeacon`. Only one copy runs at a time.
 
 ## When the pointer shows
 
@@ -88,9 +113,10 @@ Each screen gets a transparent window that sits above everything and ignores mou
 
 ## Limitations
 
-- While someone is connected you'll see two pointers at the Mac itself.
-- CursorBeacon itself adds only a few milliseconds (check with `--debug`). Most visible lag on a phone comes from the VNC stream; lowering the viewer's picture quality helps.
-- Custom cursors that apps draw themselves (for example a paint brush) show as the arrow. The shape switches when the mouse pauses, not while it is moving.
+- While the pointer is showing, you'll see two pointers on the Mac's own screen: the real one and CursorBeacon's.
+- Only sessions on port 5900 (macOS Screen Sharing, or a VNC server accepting direct connections) are detected. For cloud-relayed sessions or other ports, use **Always** or Control-Option-Command-B.
+- The pointer doesn't appear on the login or lock screen. macOS draws those above every app.
+- Custom cursors that apps draw themselves (like a paint brush) show as the arrow, and the pointer stays visible when an app hides the real cursor (for example while typing).
 
 ## License
 

@@ -5,6 +5,9 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// The release version. build-app.sh copies it into the app's Info.plist.
+let appVersion = "0.1.0"
+
 // MARK: - Configuration
 
 /// When the pointer is drawn.
@@ -48,9 +51,6 @@ struct Config {
                 if let value = iterator.next(), NSColor.parse(value) != nil {
                     config.color = value.lowercased()
                 }
-            case "--fps":
-                _ = iterator.next()
-                print("--fps is no longer needed: CursorBeacon now follows the mouse and the display refresh rate.")
             case "--show":
                 if let value = iterator.next(), let mode = ShowMode(rawValue: value.lowercased()) {
                     config.showMode = mode
@@ -63,10 +63,13 @@ struct Config {
                 config.hideWhenIdle = true
             case "--debug":
                 config.debug = true
+            case "--version":
+                print("CursorBeacon \(appVersion)")
+                exit(0)
             case "-h", "--help":
                 print("""
                 Usage: CursorBeacon [--size 12-200] [--color name|#RRGGBB] [--show always|sharing|off]
-                                    [--no-shapes] [--no-clicks] [--hide-when-idle] [--debug]
+                                    [--no-shapes] [--no-clicks] [--hide-when-idle] [--debug] [--version]
 
                 Colors: yellow, red, green, blue, pink, orange, white, or a hex value.
                 --show sharing (the default) draws the pointer only while someone is connected by VNC or Screen Sharing.
@@ -92,7 +95,11 @@ enum Settings {
     }
 
     // A fixed name, so the same settings are used whether CursorBeacon runs as a plain binary or an app.
-    private static let defaults = UserDefaults(suiteName: "me.malikrasaq.cursorbeacon") ?? .standard
+    // Inside the app that name is already its own, which macOS wants opened as `.standard`.
+    private static let suite = "me.malikrasaq.cursorbeacon"
+    private static let defaults = Bundle.main.bundleIdentifier == suite
+        ? .standard
+        : UserDefaults(suiteName: suite) ?? .standard
 
     static func load() -> Config {
         var config = Config()
@@ -955,6 +962,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "CursorBeacon")
 
         let menu = NSMenu()
+        menu.addItem(withTitle: "CursorBeacon \(appVersion)", action: nil, keyEquivalent: "")
         menu.addItem(statusLine)
         menu.addItem(.separator())
 
@@ -1030,10 +1038,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// Exits if another copy is already running, so a login item and a manual launch don't draw two pointers.
+/// The lock is released automatically when the process ends, even if it crashes.
+func ensureSingleInstance() {
+    let path = NSTemporaryDirectory() + "me.malikrasaq.cursorbeacon.lock"
+    let descriptor = open(path, O_CREAT | O_RDWR, 0o600)
+    guard descriptor >= 0 else { return }
+    if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
+        print("CursorBeacon is already running. Quit it from the menu bar first.")
+        exit(0)
+    }
+    // The descriptor stays open, holding the lock, for as long as this process runs.
+}
+
 setvbuf(stdout, nil, _IOLBF, 0)      // Print each line right away, even when piped to a file.
 
+let config = Config.parse(CommandLine.arguments, startingFrom: Settings.load())
+ensureSingleInstance()
+
 let app = NSApplication.shared
-let delegate = AppDelegate(config: Config.parse(CommandLine.arguments, startingFrom: Settings.load()))
+let delegate = AppDelegate(config: config)
 app.delegate = delegate
 app.setActivationPolicy(.accessory)   // No Dock icon.
 app.run()
