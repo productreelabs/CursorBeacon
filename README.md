@@ -9,7 +9,7 @@ Some VNC and screen-sharing setups don't show the Mac's cursor, so on a phone or
 - Changes shape with the real cursor: arrow, text beam, pointing hand, grab hands, crosshair, not-allowed, and resize arrows
 - Shows up only while someone is screen sharing, so you don't see two pointers at the Mac
 - Works across all Spaces, full-screen apps and multiple displays
-- No Dock icon, just a small menu bar item
+- No Dock icon, just a menu bar item for size, color, when to show, and launch at login
 - One Swift file, no dependencies
 
 ## Requirements
@@ -36,7 +36,21 @@ swiftc Sources/CursorBeacon/main.swift -o CursorBeacon
 ./CursorBeacon
 ```
 
+## Menu bar
+
+Click the pointer icon in the menu bar to change:
+
+- **Show Pointer**: Always, Only While Screen Sharing, or Off
+- **Size**: Small, Medium, Large or Huge
+- **Color**
+- **Match Cursor Shape**: turn off to always draw the arrow
+- **Launch at Login**
+
+Your choices are remembered between launches.
+
 ## Options
+
+The same settings can be given on the command line. Options apply to that run only and win over the menu choices.
 
 ```sh
 CursorBeacon --size 56 --color red
@@ -61,40 +75,7 @@ Connections relayed through a cloud service (for example RealVNC's cloud connect
 
 ## Start at login
 
-Copy the binary somewhere stable:
-
-```sh
-sudo cp .build/release/CursorBeacon /usr/local/bin/
-```
-
-Create `~/Library/LaunchAgents/me.malikrasaq.cursorbeacon.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>me.malikrasaq.cursorbeacon</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/local/bin/CursorBeacon</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-```
-
-Load it:
-
-```sh
-launchctl load ~/Library/LaunchAgents/me.malikrasaq.cursorbeacon.plist
-```
-
-To stop it for good, run `launchctl unload` on the same file.
+Turn on **Launch at Login** in the menu. CursorBeacon adds a small login item at `~/Library/LaunchAgents/me.malikrasaq.cursorbeacon.plist` that starts the copy you turned it on from. If you move or rebuild CursorBeacon, launching the new copy once updates it. Turn the option off to remove it.
 
 ## How it works
 

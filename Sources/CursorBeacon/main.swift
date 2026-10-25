@@ -22,15 +22,18 @@ enum ShowMode: String, CaseIterable {
 
 struct Config {
     var size: CGFloat = 40
-    var fill: NSColor = .systemYellow
+    /// A color name from `NSColor.named` or a hex value.
+    var color = "yellow"
+    var fill: NSColor { NSColor.parse(color) ?? .systemYellow }
     var stroke: NSColor = .black
     var strokeWidth: CGFloat = 2
     var showMode: ShowMode = .sharing
     var matchShapes = true
     var debug = false
 
-    static func parse(_ arguments: [String]) -> Config {
-        var config = Config()
+    /// Command-line options apply on top of the saved settings, for this run only.
+    static func parse(_ arguments: [String], startingFrom saved: Config) -> Config {
+        var config = saved
         var iterator = arguments.dropFirst().makeIterator()
 
         while let arg = iterator.next() {
@@ -40,8 +43,8 @@ struct Config {
                     config.size = CGFloat(size)
                 }
             case "--color":
-                if let value = iterator.next(), let color = NSColor.parse(value) {
-                    config.fill = color
+                if let value = iterator.next(), NSColor.parse(value) != nil {
+                    config.color = value.lowercased()
                 }
             case "--fps":
                 _ = iterator.next()
@@ -56,10 +59,11 @@ struct Config {
                 config.debug = true
             case "-h", "--help":
                 print("""
-                Usage: CursorBeacon [--size 12-200] [--color name|#RRGGBB] [--show always|sharing|off] [--debug]
+                Usage: CursorBeacon [--size 12-200] [--color name|#RRGGBB] [--show always|sharing|off] [--no-shapes] [--debug]
 
                 Colors: yellow, red, green, blue, pink, orange, white, or a hex value.
                 --show sharing (the default) draws the pointer only while someone is connected by VNC or Screen Sharing.
+                --no-shapes always draws the arrow instead of matching the cursor shape.
                 --debug prints how many milliseconds CursorBeacon adds to each mouse move.
                 Control-Option-Command-B shows or hides the pointer at any time.
                 """)
@@ -72,14 +76,46 @@ struct Config {
     }
 }
 
+/// Settings chosen from the menu, remembered between launches.
+enum Settings {
+    enum Key: String {
+        case size, color, showMode, matchShapes
+    }
+
+    // A fixed name, so the same settings are used whether CursorBeacon runs as a plain binary or an app.
+    private static let defaults = UserDefaults(suiteName: "me.malikrasaq.cursorbeacon") ?? .standard
+
+    static func load() -> Config {
+        var config = Config()
+        if let size = defaults.object(forKey: Key.size.rawValue) as? Double, (12...200).contains(size) {
+            config.size = CGFloat(size)
+        }
+        if let color = defaults.string(forKey: Key.color.rawValue), NSColor.parse(color) != nil {
+            config.color = color
+        }
+        if let raw = defaults.string(forKey: Key.showMode.rawValue), let mode = ShowMode(rawValue: raw) {
+            config.showMode = mode
+        }
+        if defaults.object(forKey: Key.matchShapes.rawValue) != nil {
+            config.matchShapes = defaults.bool(forKey: Key.matchShapes.rawValue)
+        }
+        return config
+    }
+
+    static func save(_ value: Any, for key: Key) {
+        defaults.set(value, forKey: key.rawValue)
+    }
+}
+
 extension NSColor {
+    static let named: [(name: String, color: NSColor)] = [
+        ("yellow", .systemYellow), ("red", .systemRed), ("green", .systemGreen),
+        ("blue", .systemBlue), ("pink", .systemPink), ("orange", .systemOrange),
+        ("white", .white)
+    ]
+
     static func parse(_ value: String) -> NSColor? {
-        let named: [String: NSColor] = [
-            "yellow": .systemYellow, "red": .systemRed, "green": .systemGreen,
-            "blue": .systemBlue, "pink": .systemPink, "orange": .systemOrange,
-            "white": .white
-        ]
-        if let color = named[value.lowercased()] { return color }
+        if let match = named.first(where: { $0.name == value.lowercased() }) { return match.color }
 
         let hex = value.hasPrefix("#") ? String(value.dropFirst()) : value
         guard hex.count == 6, let rgb = UInt32(hex, radix: 16) else { return nil }
@@ -373,7 +409,7 @@ final class CursorShapeDetector {
 /// Reading the system cursor goes through the window server, which also delivers mouse events,
 /// so it's left alone while the mouse moves.
 final class PointerTracker {
-    private let config: Config
+    private var config: Config
     private var windows: [OverlayWindow] = []
     private var monitors: [Any] = []
     private var displayLink: CVDisplayLink?
@@ -457,6 +493,14 @@ final class PointerTracker {
                 self.windows.forEach { $0.setShape(current) }
             }
         }
+    }
+
+    /// Applies new size, color or shape settings without restarting.
+    func apply(_ newConfig: Config) {
+        config = newConfig
+        if !config.matchShapes { shape = .arrow }
+        rebuildWindows()
+        if isVisible { startShapeChecks() }    // Starts or stops them to match the setting.
     }
 
     /// Shows or hides the pointer. While hidden, the display-synced check is paused to save power.
@@ -604,11 +648,55 @@ final class HotKey {
     }
 }
 
+// MARK: - Launch at login
+
+/// Starts CursorBeacon at login with a per-user LaunchAgent. Works for the plain binary and an app
+/// bundle on every supported macOS version, with no extra permissions.
+enum LoginItem {
+    private static let label = "me.malikrasaq.cursorbeacon"
+
+    private static var plistURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
+    }
+
+    private static var expected: NSDictionary? {
+        guard let path = Bundle.main.executableURL?.resolvingSymlinksInPath().path else { return nil }
+        return ["Label": label, "ProgramArguments": [path], "RunAtLoad": true, "ProcessType": "Interactive"]
+    }
+
+    static var isEnabled: Bool {
+        FileManager.default.fileExists(atPath: plistURL.path)
+    }
+
+    static func setEnabled(_ enabled: Bool) {
+        if enabled {
+            write()
+        } else {
+            try? FileManager.default.removeItem(at: plistURL)
+        }
+    }
+
+    /// Keeps the login item pointing at this copy, in case CursorBeacon was moved or rebuilt elsewhere.
+    static func updateIfEnabled() {
+        guard isEnabled, NSDictionary(contentsOf: plistURL) != expected else { return }
+        write()
+    }
+
+    private static func write() {
+        guard let expected else { return }
+        try? FileManager.default.createDirectory(at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        expected.write(to: plistURL, atomically: true)
+    }
+}
+
 // MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let config: Config
-    private var mode: ShowMode
+    private static let sizes: [(title: String, size: CGFloat)] = [
+        ("Small", 28), ("Medium", 40), ("Large", 56), ("Huge", 80)
+    ]
+
+    private var config: Config
     /// Set by the shortcut or "Show/Hide Now"; cleared when the mode changes or a session starts or ends.
     private var manualOverride: Bool?
     private var tracker: PointerTracker?
@@ -617,11 +705,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let toggleItem = NSMenuItem(title: "", action: #selector(toggleNow), keyEquivalent: "b")
+    private let shapesItem = NSMenuItem(title: "Match Cursor Shape", action: #selector(toggleShapes), keyEquivalent: "")
+    private let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
     private var modeItems: [ShowMode: NSMenuItem] = [:]
+    private var sizeItems: [CGFloat: NSMenuItem] = [:]
+    private var colorItems: [String: NSMenuItem] = [:]
 
     init(config: Config) {
         self.config = config
-        self.mode = config.showMode
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -629,6 +720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.start()
         self.tracker = tracker
         setUpMenuBarItem()
+        LoginItem.updateIfEnabled()
 
         sharing.onChange = { [weak self] connected in
             if self?.config.debug == true { print(connected ? "Screen sharing started." : "Screen sharing ended.") }
@@ -645,7 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var shouldShow: Bool {
         if let manualOverride { return manualOverride }
-        switch mode {
+        switch config.showMode {
         case .always: return true
         case .sharing: return sharing.isSharing
         case .off: return false
@@ -659,10 +751,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.appearsDisabled = !visible
         statusLine.title = sharing.isSharing ? "Screen sharing: connected" : "Screen sharing: not connected"
         toggleItem.title = visible ? "Hide Pointer Now" : "Show Pointer Now"
-        for (itemMode, item) in modeItems {
-            item.state = itemMode == mode ? .on : .off
-        }
+        for (mode, item) in modeItems { item.state = mode == config.showMode ? .on : .off }
+        for (size, item) in sizeItems { item.state = size == config.size ? .on : .off }
+        for (color, item) in colorItems { item.state = color == config.color ? .on : .off }
+        shapesItem.state = config.matchShapes ? .on : .off
+        loginItem.state = LoginItem.isEnabled ? .on : .off
     }
+
+    // MARK: Menu actions
 
     @objc private func toggleNow() {
         manualOverride = !shouldShow
@@ -670,11 +766,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func chooseMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let newMode = ShowMode(rawValue: raw) else { return }
-        mode = newMode
+        guard let raw = sender.representedObject as? String, let mode = ShowMode(rawValue: raw) else { return }
+        config.showMode = mode
+        Settings.save(mode.rawValue, for: .showMode)
         manualOverride = nil
         refresh()
     }
+
+    @objc private func chooseSize(_ sender: NSMenuItem) {
+        guard let size = sender.representedObject as? CGFloat else { return }
+        config.size = size
+        Settings.save(Double(size), for: .size)
+        tracker?.apply(config)
+        refresh()
+    }
+
+    @objc private func chooseColor(_ sender: NSMenuItem) {
+        guard let color = sender.representedObject as? String else { return }
+        config.color = color
+        Settings.save(color, for: .color)
+        tracker?.apply(config)
+        refresh()
+    }
+
+    @objc private func toggleShapes() {
+        config.matchShapes.toggle()
+        Settings.save(config.matchShapes, for: .matchShapes)
+        tracker?.apply(config)
+        refresh()
+    }
+
+    @objc private func toggleLogin() {
+        LoginItem.setEnabled(!LoginItem.isEnabled)
+        refresh()
+    }
+
+    // MARK: Menu
 
     private func setUpMenuBarItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -685,13 +812,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         menu.addItem(withTitle: "Show Pointer", action: nil, keyEquivalent: "")
-        for showMode in ShowMode.allCases {
-            let modeItem = NSMenuItem(title: showMode.title, action: #selector(chooseMode(_:)), keyEquivalent: "")
-            modeItem.target = self
-            modeItem.representedObject = showMode.rawValue
+        for mode in ShowMode.allCases {
+            let modeItem = menuItem(mode.title, action: #selector(chooseMode(_:)), value: mode.rawValue)
             modeItem.indentationLevel = 1
             menu.addItem(modeItem)
-            modeItems[showMode] = modeItem
+            modeItems[mode] = modeItem
         }
         menu.addItem(.separator())
 
@@ -699,17 +824,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleItem.keyEquivalentModifierMask = [.control, .option, .command]
         menu.addItem(toggleItem)
         menu.addItem(.separator())
+
+        let sizeMenu = NSMenu()
+        for (title, size) in Self.sizes {
+            let sizeItem = menuItem(title, action: #selector(chooseSize(_:)), value: size)
+            sizeMenu.addItem(sizeItem)
+            sizeItems[size] = sizeItem
+        }
+        menu.addItem(submenu("Size", sizeMenu))
+
+        let colorMenu = NSMenu()
+        for (name, color) in NSColor.named {
+            let colorItem = menuItem(name.capitalized, action: #selector(chooseColor(_:)), value: name)
+            colorItem.image = swatch(color)
+            colorMenu.addItem(colorItem)
+            colorItems[name] = colorItem
+        }
+        menu.addItem(submenu("Color", colorMenu))
+
+        shapesItem.target = self
+        menu.addItem(shapesItem)
+        loginItem.target = self
+        menu.addItem(loginItem)
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
 
         statusItem = item
+    }
+
+    private func menuItem(_ title: String, action: Selector, value: Any) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = value
+        return item
+    }
+
+    private func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = menu
+        return item
+    }
+
+    /// A small filled circle showing a color choice.
+    private func swatch(_ color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1))
+            color.setFill()
+            circle.fill()
+            NSColor.black.withAlphaComponent(0.35).setStroke()
+            circle.stroke()
+            return true
+        }
     }
 }
 
 setvbuf(stdout, nil, _IOLBF, 0)      // Print each line right away, even when piped to a file.
 
 let app = NSApplication.shared
-let delegate = AppDelegate(config: Config.parse(CommandLine.arguments))
+let delegate = AppDelegate(config: Config.parse(CommandLine.arguments, startingFrom: Settings.load()))
 app.delegate = delegate
 app.setActivationPolicy(.accessory)   // No Dock icon.
 app.run()
