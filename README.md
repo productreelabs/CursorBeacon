@@ -38,14 +38,14 @@ swiftc Sources/CursorBeacon/main.swift -o CursorBeacon
 
 ```sh
 CursorBeacon --size 56 --color red
-CursorBeacon --color "#00E5FF" --fps 30
+CursorBeacon --color "#00E5FF" --debug
 ```
 
 | Option    | Default | Notes                                                   |
 |-----------|---------|---------------------------------------------------------|
 | `--size`  | 40      | 12 to 200 points                                        |
 | `--color` | yellow  | yellow, red, green, blue, pink, orange, white, or hex   |
-| `--fps`   | 60      | 10 to 120. Lower uses less CPU                          |
+| `--debug` | off     | Prints how many milliseconds each mouse move takes      |
 
 ## Start at login
 
@@ -86,12 +86,12 @@ To stop it for good, run `launchctl unload` on the same file.
 
 ## How it works
 
-A small transparent window sits above everything, ignores mouse events, and moves to the cursor position on every frame. Since it's a normal window, it's part of the captured screen, unlike the real cursor, which some VNC setups leave out.
+Each screen gets a transparent window that sits above everything and ignores mouse events. The arrow is drawn once, then moved inside that window on every mouse event, with a check on each display refresh to catch moves that don't send events. Since it's a normal window, it's part of the captured screen, unlike the real cursor, which some VNC setups leave out.
 
 ## Limitations
 
 - You'll see two pointers when using the Mac directly. Quit from the menu bar when you don't need it.
-- There can be a small lag between the real cursor and the drawn one.
+- CursorBeacon itself adds only a few milliseconds (check with `--debug`). Most visible lag on a phone comes from the VNC stream; lowering the viewer's picture quality helps.
 - The pointer is always an arrow; it doesn't change to a text beam or hand.
 
 ## License
