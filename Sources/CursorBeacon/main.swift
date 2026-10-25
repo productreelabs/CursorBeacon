@@ -369,8 +369,9 @@ final class CursorShapeDetector {
 
 /// Moves the pointer on every mouse event, with a display-synced check as a safety net
 /// for moves that don't produce events (for example, a VNC client warping the cursor).
-/// The shape follows the real cursor, checked a few times a second on a background queue:
-/// reading the system cursor can stall for over 100 ms, and the pointer must never wait on it.
+/// The shape follows the real cursor, checked on a background queue whenever the mouse pauses.
+/// Reading the system cursor goes through the window server, which also delivers mouse events,
+/// so it's left alone while the mouse moves.
 final class PointerTracker {
     private let config: Config
     private var windows: [OverlayWindow] = []
@@ -385,6 +386,7 @@ final class PointerTracker {
     private var shapeCheckRunning = false
     private var movedSinceShapeCheck = true
     private var lastShapeCheck: TimeInterval = 0
+    private var lastMove: TimeInterval = 0
     private let latency = LatencyStats()
 
     init(config: Config) {
@@ -422,13 +424,14 @@ final class PointerTracker {
         if config.debug { latency.start() }
     }
 
-    /// Checks the cursor shape 10 times a second while the mouse moves, twice a second when it's still.
+    /// Checks the cursor shape once the mouse has paused for 60 ms, then twice a second while it stays still.
     private func startShapeChecks() {
         shapeTimer?.invalidate()
         guard config.matchShapes else { return }
-        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
             guard let self else { return }
             let now = ProcessInfo.processInfo.systemUptime
+            guard now - self.lastMove >= 0.06 else { return }
             guard self.movedSinceShapeCheck || now - self.lastShapeCheck >= 0.5 else { return }
             self.updateShape()
         }
@@ -494,6 +497,7 @@ final class PointerTracker {
         guard location != lastLocation else { return }
         lastLocation = location
         movedSinceShapeCheck = true
+        lastMove = ProcessInfo.processInfo.systemUptime
         windows.forEach { $0.place(at: location) }
     }
 }

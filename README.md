@@ -98,13 +98,13 @@ To stop it for good, run `launchctl unload` on the same file.
 
 ## How it works
 
-Each screen gets a transparent window that sits above everything and ignores mouse events. Each shape is drawn once, then moved inside that window on every mouse event, with a check on each display refresh to catch moves that don't send events. A few times a second it compares the real cursor's silhouette with the standard macOS cursors to pick the matching shape. Since it's a normal window, it's part of the captured screen, unlike the real cursor, which some VNC setups leave out.
+Each screen gets a transparent window that sits above everything and ignores mouse events. Each shape is drawn once, then moved inside that window on every mouse event, with a check on each display refresh to catch moves that don't send events. Whenever the mouse pauses, it compares the real cursor's silhouette with the standard macOS cursors to pick the matching shape. Since it's a normal window, it's part of the captured screen, unlike the real cursor, which some VNC setups leave out.
 
 ## Limitations
 
 - While someone is connected you'll see two pointers at the Mac itself.
 - CursorBeacon itself adds only a few milliseconds (check with `--debug`). Most visible lag on a phone comes from the VNC stream; lowering the viewer's picture quality helps.
-- Custom cursors that apps draw themselves (for example a paint brush) show as the arrow. The shape can take up to a tenth of a second to switch.
+- Custom cursors that apps draw themselves (for example a paint brush) show as the arrow. The shape switches when the mouse pauses, not while it is moving.
 
 ## License
 
