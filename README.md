@@ -6,8 +6,9 @@ Some VNC and screen-sharing setups don't show the Mac's cursor, so on a phone or
 
 - No permissions needed
 - Clicks pass straight through it
+- Shows up only while someone is screen sharing, so you don't see two pointers at the Mac
 - Works across all Spaces, full-screen apps and multiple displays
-- No Dock icon, just a small menu bar item with Quit
+- No Dock icon, just a small menu bar item
 - One Swift file, no dependencies
 
 ## Requirements
@@ -38,14 +39,23 @@ swiftc Sources/CursorBeacon/main.swift -o CursorBeacon
 
 ```sh
 CursorBeacon --size 56 --color red
-CursorBeacon --color "#00E5FF" --debug
+CursorBeacon --color "#00E5FF" --show always
 ```
 
 | Option    | Default | Notes                                                   |
 |-----------|---------|---------------------------------------------------------|
 | `--size`  | 40      | 12 to 200 points                                        |
 | `--color` | yellow  | yellow, red, green, blue, pink, orange, white, or hex   |
+| `--show`  | sharing | `sharing`, `always` or `off` (see below)                |
 | `--debug` | off     | Prints how many milliseconds each mouse move takes      |
+
+## When the pointer shows
+
+By default the pointer appears only while someone is connected with macOS Screen Sharing or a VNC server that accepts direct connections on port 5900 (like RealVNC Server). It hides again when they disconnect. Change this from the menu bar under **Show Pointer**: Always, Only While Screen Sharing, or Off.
+
+Press **Control-Option-Command-B** anywhere to show or hide the pointer right away. That lasts until you change the mode or a sharing session starts or ends.
+
+Connections relayed through a cloud service (for example RealVNC's cloud connectivity) don't use port 5900 and aren't detected. Use **Always** or the shortcut for those.
 
 ## Start at login
 
@@ -90,7 +100,7 @@ Each screen gets a transparent window that sits above everything and ignores mou
 
 ## Limitations
 
-- You'll see two pointers when using the Mac directly. Quit from the menu bar when you don't need it.
+- While someone is connected you'll see two pointers at the Mac itself.
 - CursorBeacon itself adds only a few milliseconds (check with `--debug`). Most visible lag on a phone comes from the VNC stream; lowering the viewer's picture quality helps.
 - The pointer is always an arrow; it doesn't change to a text beam or hand.
 
