@@ -15,7 +15,7 @@ Some VNC and screen-sharing setups don't show the Mac's cursor, so on a phone or
 
 ## Install
 
-1. Download `CursorBeacon-x.y.z.zip` from the [latest release](https://github.com/logicberry/CursorBeacon/releases/latest) and unzip it.
+1. Download `CursorBeacon-x.y.z.zip` from the [latest release](https://github.com/productreelabs/CursorBeacon/releases/latest) and unzip it.
 2. Drag **CursorBeacon.app** into **Applications** and open it. A pointer icon appears in the menu bar.
 
 Runs on macOS 12 or later, on both Apple Silicon and Intel Macs.
@@ -38,7 +38,7 @@ You need macOS 12 or later and the Xcode command line tools (`xcode-select --ins
 To build the app the same way as the release (universal, with icon, zipped):
 
 ```sh
-git clone https://github.com/logicberry/CursorBeacon.git
+git clone https://github.com/productreelabs/CursorBeacon.git
 cd CursorBeacon
 ./build-app.sh
 ```
@@ -105,7 +105,7 @@ Connections relayed through a cloud service (for example RealVNC's cloud connect
 
 ## Start at login
 
-Turn on **Launch at Login** in the menu. CursorBeacon adds a small login item at `~/Library/LaunchAgents/me.malikrasaq.cursorbeacon.plist` that starts the copy you turned it on from. If you move or rebuild CursorBeacon, launching the new copy once updates it. Turn the option off to remove it.
+Turn on **Launch at Login** in the menu. CursorBeacon adds a small login item at `~/Library/LaunchAgents/com.productreelabs.cursorbeacon.plist` that starts the copy you turned it on from. If you move or rebuild CursorBeacon, launching the new copy once updates it. Turn the option off to remove it.
 
 ## How it works
 

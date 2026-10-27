@@ -37,7 +37,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleDisplayName</key>
     <string>CursorBeacon</string>
     <key>CFBundleIdentifier</key>
-    <string>me.malikrasaq.cursorbeacon</string>
+    <string>com.productreelabs.cursorbeacon</string>
     <key>CFBundleExecutable</key>
     <string>CursorBeacon</string>
     <key>CFBundleIconFile</key>

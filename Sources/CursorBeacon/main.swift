@@ -96,7 +96,7 @@ enum Settings {
 
     // A fixed name, so the same settings are used whether CursorBeacon runs as a plain binary or an app.
     // Inside the app that name is already its own, which macOS wants opened as `.standard`.
-    private static let suite = "me.malikrasaq.cursorbeacon"
+    private static let suite = "com.productreelabs.cursorbeacon"
     private static let defaults = Bundle.main.bundleIdentifier == suite
         ? .standard
         : UserDefaults(suiteName: suite) ?? .standard
@@ -789,7 +789,7 @@ final class HotKey {
 /// Starts CursorBeacon at login with a per-user LaunchAgent. Works for the plain binary and an app
 /// bundle on every supported macOS version, with no extra permissions.
 enum LoginItem {
-    private static let label = "me.malikrasaq.cursorbeacon"
+    private static let label = "com.productreelabs.cursorbeacon"
 
     private static var plistURL: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
@@ -1041,7 +1041,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// Exits if another copy is already running, so a login item and a manual launch don't draw two pointers.
 /// The lock is released automatically when the process ends, even if it crashes.
 func ensureSingleInstance() {
-    let path = NSTemporaryDirectory() + "me.malikrasaq.cursorbeacon.lock"
+    let path = NSTemporaryDirectory() + "com.productreelabs.cursorbeacon.lock"
     let descriptor = open(path, O_CREAT | O_RDWR, 0o600)
     guard descriptor >= 0 else { return }
     if flock(descriptor, LOCK_EX | LOCK_NB) != 0 {
